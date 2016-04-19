@@ -29,7 +29,8 @@ Library
                         Language.Verilog.PrettyPrint,
                         Language.Verilog
 
-  build-depends:      binary, pretty, parsec == 3.*, mtl
+  build-depends:      binary, pretty, parsec == 3.*, mtl 
+                     , wl-pprint-text, text
   if flag(base4)
      build-depends:   base == 4.*, syb
   else

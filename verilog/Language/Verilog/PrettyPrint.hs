@@ -16,7 +16,9 @@
 module Language.Verilog.PrettyPrint where
 
 import Data.Maybe               ( fromMaybe )
-import Text.PrettyPrint
+import qualified Text.PrettyPrint.Leijen.Text as PP
+import Text.PrettyPrint.Leijen.Text hiding (text)
+import qualified Data.Text.Lazy as T
 
 import Language.Verilog.Syntax
 
@@ -24,7 +26,7 @@ import Language.Verilog.Syntax
 -- some utilities, which should go in a common module elsewhere
 
 commasep :: [Doc] -> Doc
-commasep = fsep . punctuate comma
+commasep = fillSep . punctuate comma
 
 mb :: (x -> Doc) -> Maybe x -> Doc
 mb = maybe empty
@@ -34,6 +36,9 @@ period = char '.'
 
 tick :: Doc
 tick = char '\''
+
+text :: String -> Doc
+text = PP.text . T.pack
 
 -- -----------------------------------------------------------------------------
 -- 1. Source Text
@@ -48,8 +53,8 @@ ppDescription (UDPDescription udp)  = ppUDP udp
 
 ppModule :: Module -> Doc
 ppModule (Module name ports body)
-  = text "module" <+> ppIdent name <+> ppPorts ports <> semi $$
-    nest 2 (vcat (map ppItem body)) $$
+  = text "module" <+> ppIdent name <+> ppPorts ports <> semi <$$>
+    nest 2 (vcat (map ppItem body)) <$$>
     text "endmodule" <> char '\n'
 
 ppPorts :: [Ident] -> Doc
@@ -74,24 +79,24 @@ ppItem (AssignItem mb_strength mb_delay assignments)
     mb ppDelay mb_delay <+>
     commasep (map ppAssignment assignments) <> semi
 ppItem (InitialItem (EventControlStmt ctrl stmt))
-  = fsep [ text "initial", ppEventControl ctrl, nest 2 (maybe semi ppStatement stmt) ]
+  = fillSep [ text "initial", ppEventControl ctrl, nest 2 (maybe semi ppStatement stmt) ]
 ppItem (InitialItem stmt)
-  = fsep [ text "initial", nest 2 (ppStatement stmt) ]
+  = fillSep [ text "initial", nest 2 (ppStatement stmt) ]
 ppItem (AlwaysItem (EventControlStmt ctrl stmt))
-  = fsep [ text "always", ppEventControl ctrl, nest 2 (maybe semi ppStatement stmt) ]
+  = fillSep [ text "always", ppEventControl ctrl, nest 2 (maybe semi ppStatement stmt) ]
 ppItem (AlwaysItem stmt)
-  = fsep [ text "always", nest 2 (ppStatement stmt) ]
+  = fillSep [ text "always", nest 2 (ppStatement stmt) ]
 
 ppItem (TaskItem name decls stmt)
-  = text "task" <+> ppIdent name <> semi $$
-    nest 2 (vcat (map ppLocalDecl decls) $$
-            ppStatement stmt) $$
+  = text "task" <+> ppIdent name <> semi <$$>
+    nest 2 (vcat (map ppLocalDecl decls) <$$>
+            ppStatement stmt) <$$>
     text "endtask"
 
 ppItem (FunctionItem t name decls stmt)
-  = text "function" <+> mb ppFunctionType t <+> ppIdent name <> semi $$
-    nest 2 (vcat (map ppLocalDecl decls) $$
-            ppStatement stmt) $$
+  = text "function" <+> mb ppFunctionType t <+> ppIdent name <> semi <$$>
+    nest 2 (vcat (map ppLocalDecl decls) <$$>
+            ppStatement stmt) <$$>
     text "endfunction"
 
 -- (copied from andy's code in GenVHDL)
@@ -102,11 +107,11 @@ ppItem (CommentItem msg)
 ppUDP :: UDP -> Doc
 ppUDP (UDP name output_var input_vars decls maybe_initial table_definition)
   = text "primitive" <+> ppIdent name <+>
-    parens (ppIdents (output_var : input_vars)) <> semi $$
-    nest 2 ( vcat (map ppUDPDecl decls) $$
-             maybe empty ppUDPInitialStatement maybe_initial $$
+    parens (ppIdents (output_var : input_vars)) <> semi <$$>
+    nest 2 ( vcat (map ppUDPDecl decls) <$$>
+             maybe empty ppUDPInitialStatement maybe_initial <$$>
              ppTableDefinition table_definition
-           ) $$
+           ) <$$>
     text "endprimitive"
 
 ppUDPDecl :: UDPDecl -> Doc
@@ -120,8 +125,8 @@ ppUDPInitialStatement (UDPInitialStatement name value)
 
 ppTableDefinition :: TableDefinition -> Doc
 ppTableDefinition table
-  = text "table" $$
-    nest 2 (vcat xs) $$
+  = text "table" <$$>
+    nest 2 (vcat xs) <$$>
     text "endtable"
   where
     xs = case table of
@@ -249,7 +254,7 @@ ppPrimName (PrimInstName x r)
 
 ppInstance :: Instance -> Doc
 ppInstance (Instance name delays_or_params insts)
-  = ppIdent name <+> ppDelaysOrParams delays_or_params $$
+  = ppIdent name <+> ppDelaysOrParams delays_or_params <$$>
     nest 2 (ppInsts insts) <> semi
 
 ppDelaysOrParams :: Either [Expression] [Parameter] -> Doc
@@ -298,13 +303,13 @@ ppStatement (IfStmt expr (Just if1@IfStmt {}) (Just if2@IfStmt {}))
   where
     if1' = SeqBlock Nothing [] [if1]
 ppStatement (IfStmt expr stmt1 stmt2)
-  = (text "if" <+> parens (ppExpr expr)) `nestStmt` (maybe semi ppStatement stmt1) $$
+  = (text "if" <+> parens (ppExpr expr)) `nestStmt` (maybe semi ppStatement stmt1) <$$>
     case stmt2 of
       Just stmt -> ppElseBranch stmt
       Nothing   -> empty
   where
     ppElseBranch (IfStmt e s1 s2)
-      = (text "else if" <+> parens (ppExpr e)) `nestStmt` (maybe semi ppStatement s1) $$
+      = (text "else if" <+> parens (ppExpr e)) `nestStmt` (maybe semi ppStatement s1) <$$>
         case s2 of
           Just s  -> ppElseBranch s
           Nothing -> empty
@@ -312,8 +317,8 @@ ppStatement (IfStmt expr stmt1 stmt2)
       = text "else" `nestStmt` ppStatement s
 
 ppStatement (CaseStmt case_type expr case_items)
-  = text (show case_type) <+> parens (ppExpr expr) $$
-    nest 2 (vcat (map ppCaseItem case_items)) $$
+  = text (show case_type) <+> parens (ppExpr expr) <$$>
+    nest 2 (vcat (map ppCaseItem case_items)) <$$>
     text "endcase"
 ppStatement (ForeverStmt stmt)
   = text "forever" `nestStmt` ppStatement stmt
@@ -336,15 +341,15 @@ ppStatement (EventControlStmt ctrl mb_stmt)
 ppStatement (WaitStmt expr stmt)
   = (text "wait" <+> parens (ppExpr expr)) `nestStmt` maybe semi ppStatement stmt
 ppStatement (SeqBlock mb_name decls stmts)
-  = text "begin" <+> x $$
-    nest 2 (vcat (map ppBlockDecl decls ++ map ppStatement stmts)) $$
+  = text "begin" <+> x <$$>
+    nest 2 (vcat (map ppBlockDecl decls ++ map ppStatement stmts)) <$$>
     text "end"
   where x = case mb_name of
               Just name -> colon <+> ppIdent name
               Nothing   -> empty
 ppStatement (ParBlock mb_name decls stmts)
-  = text "fork" <+> x $$
-    nest 2 (vcat (map ppBlockDecl decls ++ map ppStatement stmts)) $$
+  = text "fork" <+> x <$$>
+    nest 2 (vcat (map ppBlockDecl decls ++ map ppStatement stmts)) <$$>
     text "join"
   where x = case mb_name of
               Just name -> colon <+> ppIdent name
@@ -370,12 +375,12 @@ ppStatement (ForceStmt assignment)
 ppStatement (ReleaseStmt x)
   = text "release" <+> ppLValue x <> semi
 
--- a helper for pretty-printing statement.  'fsep' chooses whether to put the
+-- a helper for pretty-printing statement.  'fillSep' chooses whether to put the
 -- statement on the same line as 'x', or nest it on the next line if it doesn't
 -- fit on the same line.
 nestStmt :: Doc -> Doc -> Doc
 nestStmt x stmt
-  = fsep [x, nest 2 stmt ]
+  = fillSep [x, nest 2 stmt ]
 
 ppAssignment :: Assignment -> Doc
 ppAssignment (Assignment x expr)
@@ -383,9 +388,9 @@ ppAssignment (Assignment x expr)
 
 ppCaseItem :: CaseItem -> Doc
 ppCaseItem (CaseItem es mb_stmt)
-  = fsep [ commasep (map ppExpr es) <+> colon, maybe semi ppStatement mb_stmt ]
+  = fillSep [ commasep (map ppExpr es) <+> colon, maybe semi ppStatement mb_stmt ]
 ppCaseItem (CaseDefault mb_stmt)
-  = fsep [ text "default" <+> colon, maybe semi ppStatement mb_stmt ]
+  = fillSep [ text "default" <+> colon, maybe semi ppStatement mb_stmt ]
 
 ppBlockDecl :: BlockDecl -> Doc
 ppBlockDecl (ParamDeclBlock x)   = ppParamDecl x
@@ -430,7 +435,7 @@ ppExpr' prec (ExprUnary op expr)
 ppExpr' prec (ExprBinary op expr1 expr2)
   = if prec > op_prec then parens e else e
   where
-    e = fsep [ppExpr' op_prec expr1, text x, ppExpr' (op_prec + 1) expr2 ]
+    e = fillSep [ppExpr' op_prec expr1, text x, ppExpr' (op_prec + 1) expr2 ]
     (x, op_prec) = lookupOp op binary_op_table
 
 -- this adds unnecessary parens, but it makes the concrete syntax much easier to
@@ -439,7 +444,7 @@ ppExpr' prec (ExprBinary op expr1 expr2)
 ppExpr' prec (ExprCond e1 e2 e3)
   = if prec > cond_prec then parens x else x
   where
-    x = fsep [ pp e1, char '?', pp e2, colon, pp e3 ]
+    x = fillSep [ pp e1, char '?', pp e2, colon, pp e3 ]
 
     pp e
       | add_parens e = parens (ppExpr e)
@@ -453,7 +458,7 @@ ppExpr' prec (ExprCond e1 e2 e3)
 ppExpr' prec (ExprCond e1 e2 e3)
   = if prec > cond_prec then parens e else e
   where
-    e = fsep [ ppExpr e1, char '?', ppExpr e2, colon, ppExpr e3 ]
+    e = fillSep [ ppExpr e1, char '?', ppExpr e2, colon, ppExpr e3 ]
 
 ppExpr' _ (ExprFunCall x es)
   = ppIdent x <+> parens (commasep (map ppExpr es))
