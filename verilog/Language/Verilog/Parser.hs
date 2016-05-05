@@ -177,19 +177,19 @@ module_description
 
 module_item :: Stream s Identity Char => P s Item
 module_item
-  = liftM ParamDeclItem parameter_declaration <|>
-    liftM InputDeclItem input_declaration <|>
-    liftM OutputDeclItem output_declaration <|>
-    liftM InOutDeclItem inout_declaration <|>
-    liftM NetDeclItem net_declaration <|>
-    liftM RegDeclItem reg_declaration <|>
-    liftM EventDeclItem event_declaration <|>
-    liftM PrimitiveInstItem primitive_instance <|>
-    liftM InstanceItem module_or_udp_instance <|>
-    liftM ParamOverrideItem (fail "TODO param override") <|>
+  = liftM (NonPort . ParamDeclItem) parameter_declaration <|>
+    liftM (Port . InputDeclItem) input_declaration <|>
+    liftM (Port . OutputDeclItem) output_declaration <|>
+    liftM (Port . InOutDeclItem) inout_declaration <|>
+    liftM (NonPort . NetDeclItem) net_declaration <|>
+    liftM (NonPort . RegDeclItem) reg_declaration <|>
+    liftM (NonPort . EventDeclItem) event_declaration <|>
+    liftM (NonPort . PrimitiveInstItem) primitive_instance <|>
+    liftM (NonPort . InstanceItem) module_or_udp_instance <|>
+    liftM (NonPort . ParamOverrideItem)(fail "TODO param override") <|>
     continuous_assign <|>
-    (reserved "initial" >> liftM InitialItem statement) <|>
-    (reserved "always" >> liftM AlwaysItem statement) <|>
+    (reserved "initial" >> liftM (NonPort . InitialItem) statement) <|>
+    (reserved "always" >> liftM (NonPort . AlwaysItem) statement) <|>
     task_decl <|>
     function_decl
   <?> "module item"
@@ -202,7 +202,7 @@ task_decl
        ys <- many local_decl
        s <- statement
        reserved "endtask"
-       return (TaskItem x ys s)
+       return (NonPort $ TaskItem x ys s)
 
 function_decl :: Stream s Identity Char => P s Item
 function_decl
@@ -213,7 +213,7 @@ function_decl
        ys <- many local_decl
        s <- statement
        reserved "endfunction"
-       return (FunctionItem t x ys s)
+       return (NonPort $ FunctionItem t x ys s)
 
 function_type :: Stream s Identity Char => P s FunctionType
 function_type
@@ -400,7 +400,7 @@ continuous_assign
        d <- optionMaybe delay
        xs <- commaSep1 assignment
        semi
-       return (AssignItem s d xs)
+       return (NonPort $ AssignItem s d xs)
 
 -- -----------------------------------------------------------------------------
 -- primitive instantiation

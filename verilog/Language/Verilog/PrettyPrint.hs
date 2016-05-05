@@ -17,7 +17,7 @@ module Language.Verilog.PrettyPrint where
 
 import Data.Maybe               ( fromMaybe )
 import qualified Text.PrettyPrint.Leijen.Text as PP
-import Text.PrettyPrint.Leijen.Text hiding (text)
+import Text.PrettyPrint.Leijen.Text hiding (text, (<$>))
 import qualified Data.Text.Lazy as T
 
 import Language.Verilog.Syntax
@@ -27,6 +27,9 @@ import Language.Verilog.Syntax
 
 commasep :: [Doc] -> Doc
 commasep = fillSep . punctuate comma
+
+commasepV :: [Doc] -> Doc
+commasepV = vcat . punctuate comma
 
 mb :: (x -> Doc) -> Maybe x -> Doc
 mb = maybe empty
@@ -39,6 +42,19 @@ tick = char '\''
 
 text :: String -> Doc
 text = PP.text . T.pack
+
+encLines :: Doc -> Doc
+encLines = enclose (char '\n') (char '\n')
+
+parensLines :: Int -> Doc -> Doc
+parensLines depth d = nest depth ((char '(') <$$> d) <$$> char ')'
+
+depthSigs :: Int
+depthSigs = 4
+depthBody :: Int
+depthBody = 0
+depthProc :: Int
+depthProc = 4
 
 -- -----------------------------------------------------------------------------
 -- 1. Source Text
@@ -54,69 +70,88 @@ ppDescription (UDPDescription udp)  = ppUDP udp
 ppModule :: Module -> Doc
 ppModule (Module name ports body)
   = text "module" <+> ppIdent name <+> ppPorts ports <> semi <$$>
-    nest 2 (vcat (map ppItem body)) <$$>
+    nest depthBody (vcat (map ppItem body)) <$$>
+    text "endmodule" <> char '\n'
+
+ppModule (ModulePortDecl name ports body)
+  = text "module" <+> ppIdent name <+> char '\n' <> ppPortDecls ports <> semi <$$>
+    nest depthBody (vcat (map ppNonPortItem body)) <$$>
     text "endmodule" <> char '\n'
 
 ppPorts :: [Ident] -> Doc
 ppPorts []  = empty
 ppPorts xs  = parens (ppIdents xs)
 
+ppPortDecls :: [PortItem] -> Doc
+ppPortDecls []  = empty
+ppPortDecls xs  = parensLines depthSigs ((commasepV . map ppPortDecl) xs)
+
+ppNonPortItem :: NonPortItem -> Doc
+ppNonPortItem = ppItem . NonPort
+
+ppPortDecl :: PortItem -> Doc
+ppPortDecl (InputDeclItem x)        = ppInputDecl x
+ppPortDecl (OutputDeclItem x)       = ppOutputDecl x
+ppPortDecl (OutputRegDeclItem x)    = ppOutputRegDecl x
+ppPortDecl (InOutDeclItem x)        = ppInOutDecl x
+
 ppItem :: Item -> Doc
-ppItem (ParamDeclItem x)     = ppParamDecl x
-ppItem (InputDeclItem x)     = ppInputDecl x
-ppItem (OutputDeclItem x)    = ppOutputDecl x
-ppItem (InOutDeclItem x)     = ppInOutDecl x
-ppItem (NetDeclItem x)       = ppNetDecl x
-ppItem (RegDeclItem x)       = ppRegDecl x
-ppItem (EventDeclItem x)     = ppEventDecl x
-ppItem (PrimitiveInstItem x) = ppPrimitiveInst x
-ppItem (InstanceItem x)      = ppInstance x
-ppItem (ParamOverrideItem xs)
+ppItem (NonPort (ParamDeclItem x))     = ppParamDecl x
+ppItem (Port (InputDeclItem x))        = ppInputDecl x <> semi
+ppItem (Port (OutputDeclItem x))       = ppOutputDecl x <> semi
+ppItem (Port (OutputRegDeclItem x))    = ppOutputRegDecl x <> semi
+ppItem (Port (InOutDeclItem x))        = ppInOutDecl x <> semi
+ppItem (NonPort (NetDeclItem x))       = ppNetDecl x
+ppItem (NonPort (RegDeclItem x))       = ppRegDecl x
+ppItem (NonPort (EventDeclItem x))     = ppEventDecl x
+ppItem (NonPort (PrimitiveInstItem x)) = ppPrimitiveInst x
+ppItem (NonPort (InstanceItem x))      = ppInstance x <> char '\n'
+ppItem (NonPort (ParamOverrideItem xs))
   = text "defparam" <+> ppParamAssigns xs <> semi
-ppItem (AssignItem mb_strength mb_delay assignments)
+ppItem (NonPort (AssignItem mb_strength mb_delay assignments))
   = text "assign" <+>
     mb ppDriveStrength mb_strength <+>
     mb ppDelay mb_delay <+>
     commasep (map ppAssignment assignments) <> semi
-ppItem (InitialItem (EventControlStmt ctrl stmt))
-  = fillSep [ text "initial", ppEventControl ctrl, nest 2 (maybe semi ppStatement stmt) ]
-ppItem (InitialItem stmt)
-  = fillSep [ text "initial", nest 2 (ppStatement stmt) ]
-ppItem (AlwaysItem (EventControlStmt ctrl stmt))
-  = fillSep [ text "always", ppEventControl ctrl, nest 2 (maybe semi ppStatement stmt) ]
-ppItem (AlwaysItem stmt)
-  = fillSep [ text "always", nest 2 (ppStatement stmt) ]
+ppItem (NonPort (InitialItem (EventControlStmt ctrl stmt)))
+  = fillSep [ text "initial", ppEventControl ctrl, nest depthProc (maybe semi ppStatement stmt) ]
+ppItem (NonPort (InitialItem stmt))
+  = fillSep [ text "initial", nest depthProc (ppStatement stmt) ]
+ppItem (NonPort (AlwaysItem (EventControlStmt ctrl stmt)))
+  = fillSep [ text "always", ppEventControl ctrl] <$$> (maybe semi ppStatement stmt) <> char '\n'
+ppItem (NonPort (AlwaysItem stmt))
+  = fillSep [ text "always" ] <$$> nest depthProc (ppStatement stmt) <> char '\n'
 
-ppItem (TaskItem name decls stmt)
+ppItem (NonPort (TaskItem name decls stmt))
   = text "task" <+> ppIdent name <> semi <$$>
-    nest 2 (vcat (map ppLocalDecl decls) <$$>
+    nest depthProc (vcat (map ppLocalDecl decls) <$$>
             ppStatement stmt) <$$>
     text "endtask"
 
-ppItem (FunctionItem t name decls stmt)
+ppItem (NonPort (FunctionItem t name decls stmt))
   = text "function" <+> mb ppFunctionType t <+> ppIdent name <> semi <$$>
-    nest 2 (vcat (map ppLocalDecl decls) <$$>
+    nest depthProc (vcat (map ppLocalDecl decls) <$$>
             ppStatement stmt) <$$>
     text "endfunction"
 
 -- (copied from andy's code in GenVHDL)
 -- TODO: get multline working
-ppItem (CommentItem msg)
+ppItem (NonPort (CommentItem msg))
   = vcat [ text "//" <+> text m | m <- lines msg ]
 
 ppUDP :: UDP -> Doc
 ppUDP (UDP name output_var input_vars decls maybe_initial table_definition)
   = text "primitive" <+> ppIdent name <+>
     parens (ppIdents (output_var : input_vars)) <> semi <$$>
-    nest 2 ( vcat (map ppUDPDecl decls) <$$>
+    nest depthProc ( vcat (map ppUDPDecl decls) <$$>
              maybe empty ppUDPInitialStatement maybe_initial <$$>
              ppTableDefinition table_definition
            ) <$$>
     text "endprimitive"
 
 ppUDPDecl :: UDPDecl -> Doc
-ppUDPDecl (UDPOutputDecl d) = ppOutputDecl d
-ppUDPDecl (UDPInputDecl d)  = ppInputDecl d
+ppUDPDecl (UDPOutputDecl d) = ppOutputDecl d <> semi
+ppUDPDecl (UDPInputDecl d)  = ppInputDecl d <> semi
 ppUDPDecl (UDPRegDecl x)    = text "reg" <+> ppIdent x <> semi
 
 ppUDPInitialStatement :: UDPInitialStatement -> Doc
@@ -126,7 +161,7 @@ ppUDPInitialStatement (UDPInitialStatement name value)
 ppTableDefinition :: TableDefinition -> Doc
 ppTableDefinition table
   = text "table" <$$>
-    nest 2 (vcat xs) <$$>
+    nest depthProc (vcat xs) <$$>
     text "endtable"
   where
     xs = case table of
@@ -177,27 +212,31 @@ ppFunctionType FunctionTypeInteger   = text "integer"
 ppFunctionType FunctionTypeReal      = text "real"
 
 ppLocalDecl :: LocalDecl -> Doc
-ppLocalDecl (LocalParamDecl x)       = ppParamDecl x
-ppLocalDecl (LocalInputDecl x)       = ppInputDecl x
-ppLocalDecl (LocalOutputDecl x)      = ppOutputDecl x
-ppLocalDecl (LocalInOutDecl x)       = ppInOutDecl x
-ppLocalDecl (LocalRegDecl x)         = ppRegDecl x
+ppLocalDecl (LocalParamDecl x)       = ppParamDecl x <> semi
+ppLocalDecl (LocalInputDecl x)       = ppInputDecl x <> semi
+ppLocalDecl (LocalOutputDecl x)      = ppOutputDecl x <> semi
+ppLocalDecl (LocalInOutDecl x)       = ppInOutDecl x <> semi
+ppLocalDecl (LocalRegDecl x)         = ppRegDecl x <> semi
 
 ppParamDecl :: ParamDecl -> Doc
 ppParamDecl (ParamDecl paramAssigns)
-  = text "parameter" <+> ppParamAssigns paramAssigns <> semi
+  = text "parameter" <+> ppParamAssigns paramAssigns
 
 ppInputDecl :: InputDecl -> Doc
 ppInputDecl (InputDecl mb_range vars)
-  = text "input" <+> mb ppRange mb_range <+> ppIdents vars <> semi
+  = text "input" <+> mb ppRange mb_range <+> ppIdents vars
 
 ppOutputDecl :: OutputDecl -> Doc
 ppOutputDecl (OutputDecl mb_range vars)
-  = text "output" <+> mb ppRange mb_range <+> ppIdents vars <> semi
+  = text "output" <+> mb ppRange mb_range <+> ppIdents vars
+
+ppOutputRegDecl :: OutputRegDecl -> Doc
+ppOutputRegDecl (OutputRegDecl mb_range vars)
+  = text "output reg" <+> mb ppRange mb_range <+> ppIdents vars
 
 ppInOutDecl :: InOutDecl -> Doc
 ppInOutDecl (InOutDecl mb_range vars)
-  = text "inout" <+> mb ppRange mb_range <+> ppIdents vars <> semi
+  = text "inout" <+> mb ppRange mb_range <+> ppIdents vars
 
 ppNetDecl :: NetDecl -> Doc
 ppNetDecl (NetDecl t mb_range mb_delay vars)
@@ -216,7 +255,7 @@ ppNetDecl (NetDeclAssign t mb_strength mb_range mb_delay assignments)
 
 ppRegDecl :: RegDecl -> Doc
 ppRegDecl (RegDecl reg_type mb_range vars)
-  = text (show reg_type) <+> mb ppRange mb_range <+> ppRegVars vars <> semi
+  = text (show reg_type) <+> mb ppRange mb_range <+> ppRegVars vars
 
 ppRegVar :: RegVar -> Doc
 ppRegVar (RegVar x Nothing)
@@ -255,7 +294,7 @@ ppPrimName (PrimInstName x r)
 ppInstance :: Instance -> Doc
 ppInstance (Instance name delays_or_params insts)
   = ppIdent name <+> ppDelaysOrParams delays_or_params <$$>
-    nest 2 (ppInsts insts) <> semi
+    nest depthSigs (ppInsts insts) <> semi
 
 ppDelaysOrParams :: Either [Expression] [Parameter] -> Doc
 ppDelaysOrParams (Left [])  = empty
@@ -318,7 +357,7 @@ ppStatement (IfStmt expr stmt1 stmt2)
 
 ppStatement (CaseStmt case_type expr case_items)
   = text (show case_type) <+> parens (ppExpr expr) <$$>
-    nest 2 (vcat (map ppCaseItem case_items)) <$$>
+    nest depthProc (vcat (map ppCaseItem case_items)) <$$>
     text "endcase"
 ppStatement (ForeverStmt stmt)
   = text "forever" `nestStmt` ppStatement stmt
@@ -341,15 +380,15 @@ ppStatement (EventControlStmt ctrl mb_stmt)
 ppStatement (WaitStmt expr stmt)
   = (text "wait" <+> parens (ppExpr expr)) `nestStmt` maybe semi ppStatement stmt
 ppStatement (SeqBlock mb_name decls stmts)
-  = text "begin" <+> x <$$>
-    nest 2 (vcat (map ppBlockDecl decls ++ map ppStatement stmts)) <$$>
+  = nest depthProc (text "begin" <+> x <$$>
+    vcat (map ppBlockDecl decls ++ map ppStatement stmts)) <$$>
     text "end"
   where x = case mb_name of
               Just name -> colon <+> ppIdent name
               Nothing   -> empty
 ppStatement (ParBlock mb_name decls stmts)
   = text "fork" <+> x <$$>
-    nest 2 (vcat (map ppBlockDecl decls ++ map ppStatement stmts)) <$$>
+    nest depthProc (vcat (map ppBlockDecl decls ++ map ppStatement stmts)) <$$>
     text "join"
   where x = case mb_name of
               Just name -> colon <+> ppIdent name
@@ -380,7 +419,7 @@ ppStatement (ReleaseStmt x)
 -- fit on the same line.
 nestStmt :: Doc -> Doc -> Doc
 nestStmt x stmt
-  = fillSep [x, nest 2 stmt ]
+  = fillSep [x, nest depthProc stmt ]
 
 ppAssignment :: Assignment -> Doc
 ppAssignment (Assignment x expr)
@@ -523,17 +562,17 @@ ppAssignmentControl (DelayControl delay)
 ppAssignmentControl (EventControl ctrl)
   = ppEventControl ctrl
 ppAssignmentControl (RepeatControl e ctrl)
-  = text "repear" <> parens (ppExpr e) <+> ppEventControl ctrl
+  = text "repeat" <> parens (ppExpr e) <+> ppEventControl ctrl
 
 ppDelayControl :: DelayControl -> Doc
 ppDelayControl = ppDelay
 
 ppEventControl :: EventControl -> Doc
 ppEventControl ctrl
-  = char '@' <>
+  = (<>) (char '@') $ parens $
     case ctrl of
       EventControlIdent x  -> ppIdent x
-      EventControlExpr e   -> parens (ppEventExpr e)
+      EventControlExpr e   -> ppEventExpr e
       EventControlWildCard -> char '*'
 
 ppDelay :: Delay -> Doc
